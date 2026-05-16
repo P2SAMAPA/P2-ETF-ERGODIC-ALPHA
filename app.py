@@ -1,19 +1,15 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from huggingface_hub import HfApi, hf_hub_download
 import re
-from config import HF_OUTPUT_REPO, UNIVERSES, ACTIVE_UNIVERSE, HF_TOKEN, LOOKBACK_WINDOW
-from data_manager import DataManager
-from ergodic_tests import ergodicity_score
+from config import HF_OUTPUT_REPO, UNIVERSES, ACTIVE_UNIVERSE, HF_TOKEN
 
 st.set_page_config(layout="wide")
 st.title("🌀 Ergodic Theory Alpha Engine")
 st.markdown("Test ergodicity of ETF returns using Birkhoff ergodic theorem. High non‑ergodicity = path dependency = momentum signal.")
 
-# Educational expander
 with st.expander("📖 How to use this dashboard for trading", expanded=False):
     st.markdown("""
     **What is ergodicity?**  
@@ -32,14 +28,13 @@ with st.expander("📖 How to use this dashboard for trading", expanded=False):
     **Performance charts:**  
     - Top: Non‑ergodicity score over time.  
     - Middle: Cumulative returns of strategy vs benchmark.  
-    - Bottom: Top ETFs by current non‑ergodicity score.
+    - Bottom: Top ETFs by current non‑ergodicity score (pre‑computed).
     """)
 
 st.sidebar.header("Configuration")
 universe_options = list(UNIVERSES.keys())
 default_index = universe_options.index(ACTIVE_UNIVERSE) if ACTIVE_UNIVERSE in universe_options else 0
 selected_universe = st.sidebar.selectbox("Select Universe", universe_options, index=default_index)
-tickers = UNIVERSES[selected_universe]
 
 @st.cache_data(ttl=3600)
 def get_latest_run_folder():
@@ -72,29 +67,22 @@ def load_results(run_folder):
         cum_bench = pd.read_parquet(
             hf_hub_download(repo_id=HF_OUTPUT_REPO, filename=f"{run_folder}/cumulative_benchmark.parquet", repo_type="dataset", token=HF_TOKEN)
         )
-        return daily, cum_strat, cum_bench
+        latest_scores = pd.read_parquet(
+            hf_hub_download(repo_id=HF_OUTPUT_REPO, filename=f"{run_folder}/latest_etf_scores.parquet", repo_type="dataset", token=HF_TOKEN)
+        )
+        # Optional: load full history if needed for advanced plots
+        # scores_history = pd.read_parquet(...)
+        return daily, cum_strat, cum_bench, latest_scores
     except Exception as e:
         st.warning(f"Could not load results: {e}")
-        return None, None, None
-
-@st.cache_data(ttl=3600)
-def compute_per_etf_scores():
-    """Compute non‑ergodicity scores for each ETF using current data."""
-    dm = DataManager(tickers)
-    returns = dm.get_returns()
-    # Use a shorter window for responsiveness
-    window = min(252, len(returns)//2)
-    scores_df = ergodicity_score(returns, window=window)
-    # Latest score per ETF
-    latest_scores = scores_df.iloc[-1].sort_values(ascending=False)
-    return latest_scores
+        return None, None, None, None
 
 latest_run = get_latest_run_folder()
 if latest_run is None:
     st.info("No results found. Run the backtest first.")
     st.stop()
 
-daily, cum_strat, cum_bench = load_results(latest_run)
+daily, cum_strat, cum_bench, latest_scores = load_results(latest_run)
 if daily is None:
     st.stop()
 
@@ -124,20 +112,20 @@ bench_total = cum_bench['benchmark'].iloc[-1] - 1
 excess = strat_total - bench_total
 st.metric("Strategy Total Return", f"{strat_total:.2%}", delta=f"vs benchmark {excess:.2%}")
 
-# --- ETF-level display ---
+# --- ETF-level display (pre‑computed, no recomputation) ---
 st.subheader(f"Top ETFs by Current Non‑Ergodicity Score (Universe: {selected_universe})")
-with st.spinner("Computing per‑ETF ergodicity scores..."):
-    try:
-        etf_scores = compute_per_etf_scores()
-        top_etfs = etf_scores.head(10)
-        fig_etf = px.bar(x=top_etfs.index, y=top_etfs.values, title="Highest Non‑Ergodicity (most path‑dependent)")
-        fig_etf.update_layout(yaxis_title="Non‑Ergodicity Score", xaxis_title="ETF")
-        st.plotly_chart(fig_etf, use_container_width=True)
-        
-        # Full table
-        st.dataframe(etf_scores.to_frame(name="Non‑Ergodicity Score").style.format("{:.4f}"))
-    except Exception as e:
-        st.warning(f"Could not compute per‑ETF scores: {e}")
+if latest_scores is not None and not latest_scores.empty:
+    # latest_scores is a DataFrame with column 'non_ergodicity_score'
+    scores_series = latest_scores['non_ergodicity_score'].sort_values(ascending=False)
+    top_etfs = scores_series.head(10)
+    fig_etf = px.bar(x=top_etfs.index, y=top_etfs.values, title="Highest Non‑Ergodicity (most path‑dependent)")
+    fig_etf.update_layout(yaxis_title="Non‑Ergodicity Score", xaxis_title="ETF")
+    st.plotly_chart(fig_etf, use_container_width=True)
+    
+    # Full table
+    st.dataframe(scores_series.to_frame(name="Non‑Ergodicity Score").style.format("{:.4f}"))
+else:
+    st.info("No ETF scores available in the results.")
 
 st.subheader("Daily Returns & Drawdown")
 fig_daily = go.Figure()
@@ -149,4 +137,4 @@ st.subheader("Signal Distribution")
 fig_hist = px.histogram(daily, x='signal', nbins=50, title="Histogram of Non‑Ergodicity Score")
 st.plotly_chart(fig_hist, use_container_width=True)
 
-st.caption("Signal > 0 indicates path dependency (momentum). Go long when signal > 0, otherwise cash. Per‑ETF scores are computed using the same Birkhoff test on a rolling window.")
+st.caption("All ETF‑level scores are pre‑computed in the daily backtest and loaded from Hugging Face – no on‑the‑fly recalculation.")
