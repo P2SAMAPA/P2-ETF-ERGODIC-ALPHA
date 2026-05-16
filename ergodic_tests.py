@@ -1,28 +1,28 @@
 import numpy as np
+import pandas as pd
 from scipy import stats
 
 def birkhoff_ergodic_statistic(series, num_blocks=10):
     """
-    Test ergodicity by comparing time average vs ensemble average.
-    Returns: test statistic (difference) and p-value (if significantly different from zero).
+    Test ergodicity for a 1D series.
+    Returns: difference (time avg - ensemble avg) and p-value.
     """
+    series = np.asarray(series).flatten()
     n = len(series)
+    if n < num_blocks * 2:
+        return np.nan, np.nan
+    
     # Time average
     time_avg = np.mean(series)
     
-    # Ensemble average: split into blocks, compute mean of each block, then average
+    # Ensemble average: split into blocks
     block_size = n // num_blocks
-    if block_size < 2:
-        return np.nan, np.nan
     blocks = [series[i*block_size:(i+1)*block_size] for i in range(num_blocks)]
     block_means = [np.mean(block) for block in blocks]
     ensemble_avg = np.mean(block_means)
-    
-    # Difference as test statistic
     diff = time_avg - ensemble_avg
     
-    # Bootstrap for significance
-    # Null: diff should be zero if ergodic
+    # Bootstrap significance
     boot_diffs = []
     for _ in range(500):
         boot_series = np.random.choice(series, size=n, replace=True)
@@ -34,15 +34,20 @@ def birkhoff_ergodic_statistic(series, num_blocks=10):
     
     return diff, p_value
 
-def ergodicity_score(returns, window=252, num_blocks=10):
+def ergodicity_score(returns_df, window=252, num_blocks=10):
     """
-    Rolling ergodicity test.
-    Returns: Series of test statistics (absolute diff) – higher = more non-ergodic.
+    Rolling ergodicity test for each asset separately.
+    Returns: DataFrame of non-ergodicity scores (abs diff) per asset.
     """
-    dates = returns.index
-    scores = []
-    for i in range(window, len(returns)):
-        train = returns.iloc[i-window:i].values
-        diff, p = birkhoff_ergodic_statistic(train, num_blocks)
-        scores.append(np.abs(diff) if not np.isnan(diff) else 0)
-    return pd.Series(scores, index=dates[window:], name='non_ergodicity')
+    dates = returns_df.index
+    scores = pd.DataFrame(index=dates[window:], columns=returns_df.columns)
+    
+    for col in returns_df.columns:
+        col_vals = returns_df[col].values
+        col_scores = []
+        for i in range(window, len(returns_df)):
+            train = col_vals[i-window:i]
+            diff, _ = birkhoff_ergodic_statistic(train, num_blocks)
+            col_scores.append(np.abs(diff) if not np.isnan(diff) else 0)
+        scores[col] = col_scores
+    return scores
