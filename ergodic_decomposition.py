@@ -1,12 +1,12 @@
+import pandas as pd
 import numpy as np
 from sklearn.decomposition import PCA
 
 def ergodic_decomposition(returns, n_components=3):
     """
-    Decompose return series into ergodic components using PCA on rolling moments.
-    Returns: components (DataFrame of principal components)
+    Decompose return series into ergodic components using PCA on covariance matrix.
+    Returns: components (DataFrame of principal components), explained variance ratio.
     """
-    # Use PCA on the covariance matrix of returns (assumes ergodic components are orthogonal)
     cov_matrix = returns.cov()
     pca = PCA(n_components=n_components)
     pca.fit(cov_matrix)
@@ -18,22 +18,22 @@ def ergodic_decomposition(returns, n_components=3):
 
 def extract_path_dependency(returns, ergodic_components):
     """
-    Path dependency signal = residual after removing ergodic components.
-    High residual variance indicates non-ergodicity.
+    Path dependency signal = residual variance after removing ergodic components.
+    Returns: Series of variance of residuals across assets (cross-sectional).
     """
-    # Use regression to remove ergodic components from each asset return
     residuals = pd.DataFrame(index=returns.index, columns=returns.columns)
     for col in returns.columns:
         y = returns[col].values
         X = ergodic_components.values
-        # Add constant
+        # Add constant term
         X = np.column_stack([np.ones(len(X)), X])
         try:
             coeffs = np.linalg.lstsq(X, y, rcond=None)[0]
             pred = X @ coeffs
             residuals[col] = y - pred
         except:
-            residuals[col] = 0
-    # Path dependency measure = variance of residuals over rolling window
-    path_dep = residuals.var(axis=1)  # cross-sectional variance of residuals
+            residuals[col] = 0.0
+    # Cross-sectional variance of residuals at each time step
+    path_dep = residuals.var(axis=1, skipna=True)
+    path_dep.name = 'path_dependency'
     return path_dep
