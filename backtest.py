@@ -2,7 +2,8 @@ import pandas as pd
 import numpy as np
 from data_manager import DataManager
 from signal_generator import compute_ergodic_signal
-from config import UNIVERSES, ACTIVE_UNIVERSE, TRAIN_WINDOW, REBALANCE_FREQ, COMMISSION
+from ergodic_tests import ergodicity_score
+from config import UNIVERSES, ACTIVE_UNIVERSE
 
 def run_backtest():
     tickers = UNIVERSES[ACTIVE_UNIVERSE]
@@ -18,16 +19,23 @@ def run_backtest():
 
     # Generate strategy returns: long when signal > 0, else cash
     strategy_returns = pd.Series(0.0, index=dates)
-    # Align signal with dates (forward fill)
     signal_aligned = signal_series.reindex(dates, method='ffill').fillna(0)
-
-    # Simple threshold: go long if signal > 0
     in_market = signal_aligned > 0
     strategy_returns[in_market] = benchmark_returns[in_market]
 
     # Cumulative returns
     cum_strat = (1 + strategy_returns).cumprod()
     cum_bench = (1 + benchmark_returns).cumprod()
+
+    # --- Pre‑compute per‑ETF non‑ergodicity scores (latest rolling window) ---
+    print("Computing per‑ETF ergodicity scores...")
+    # Use a 252-day window for final scores
+    window = min(252, len(returns)//2)
+    per_etf_scores = ergodicity_score(returns, window=window)
+    # Take the latest available score for each ETF
+    latest_scores = per_etf_scores.iloc[-1].sort_values(ascending=False)
+    # Also store the full history of per‑ETF scores for potential time‑series display
+    per_etf_scores_history = per_etf_scores
 
     # Daily results DataFrame
     results_df = pd.DataFrame({
@@ -36,10 +44,4 @@ def run_backtest():
         'signal': signal_aligned
     }, index=dates)
 
-    return results_df, cum_strat, cum_bench
-
-if __name__ == "__main__":
-    # Quick test
-    df, cs, cb = run_backtest()
-    print(f"Strategy final return: {cs.iloc[-1]-1:.2%}")
-    print(f"Benchmark final return: {cb.iloc[-1]-1:.2%}")
+    return results_df, cum_strat, cum_bench, latest_scores, per_etf_scores_history
