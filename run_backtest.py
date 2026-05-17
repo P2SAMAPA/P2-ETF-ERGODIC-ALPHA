@@ -1,18 +1,18 @@
-from backtest import run_backtest_all_universes
+from backtest import run_backtest_for_universe
 from results_uploader import upload_results
 from config import UNIVERSES
 
 def main():
-    print(f"Running Ergodic Theory backtest for all universes: {list(UNIVERSES.keys())}")
-    all_results = run_backtest_all_universes()
+    print("Running Ergodic Theory backtest for all universes...")
+    all_results = {}
+    for universe_name, tickers in UNIVERSES.items():
+        print(f"\n{'='*50}\nRunning for universe: {universe_name}\n{'='*50}")
+        results = run_backtest_for_universe(universe_name, tickers)
+        all_results.update(results)
     
-    for universe_name, results_dict in all_results.items():
-        # Add universe prefix to each key
-        prefixed_dict = {f"{universe_name}_{k}": v for k, v in results_dict.items()}
-        upload_results(prefixed_dict, run_id=None)
-        print(f"Uploaded results for universe: {universe_name}")
-    
-    print("All backtests completed.")
+    # Upload everything under one run folder
+    upload_results(all_results)
+    print("\nAll backtests completed and uploaded to a single run folder.")
 
 if __name__ == "__main__":
     main()
