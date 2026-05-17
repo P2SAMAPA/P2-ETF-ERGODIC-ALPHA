@@ -1,28 +1,18 @@
-from backtest import run_backtest
+from backtest import run_backtest_all_universes
 from results_uploader import upload_results
-from config import ACTIVE_UNIVERSE, UNIVERSES
+from config import UNIVERSES
 
 def main():
-    print(f"Running Ergodic Theory backtest for universe: {ACTIVE_UNIVERSE} ({len(UNIVERSES[ACTIVE_UNIVERSE])} tickers)")
-    results_df, cum_strat, cum_bench, latest_scores, per_etf_scores_history = run_backtest()
+    print(f"Running Ergodic Theory backtest for all universes: {list(UNIVERSES.keys())}")
+    all_results = run_backtest_all_universes()
     
-    if results_df is not None and not results_df.empty:
-        upload_dict = {
-            "daily_returns": results_df,
-            "cumulative_strategy": cum_strat.to_frame(name="strategy"),
-            "cumulative_benchmark": cum_bench.to_frame(name="benchmark"),
-            "latest_etf_scores": latest_scores.to_frame(name="non_ergodicity_score"),
-            "per_etf_scores_history": per_etf_scores_history
-        }
-        upload_results(upload_dict)
-        print("Backtest completed and uploaded.")
-        
-        final_strat = cum_strat.iloc[-1] - 1
-        final_bench = cum_bench.iloc[-1] - 1
-        print(f"Strategy total return: {final_strat:.2%}")
-        print(f"Benchmark total return: {final_bench:.2%}")
-    else:
-        print("No results generated.")
+    for universe_name, results_dict in all_results.items():
+        # Add universe prefix to each key
+        prefixed_dict = {f"{universe_name}_{k}": v for k, v in results_dict.items()}
+        upload_results(prefixed_dict, run_id=None)
+        print(f"Uploaded results for universe: {universe_name}")
+    
+    print("All backtests completed.")
 
 if __name__ == "__main__":
     main()
